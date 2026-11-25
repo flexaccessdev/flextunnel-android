@@ -1,0 +1,10 @@
+- strict no backward compatibility (0.0.x): change formats and APIs freely, no migrations.
+- make changes on the sibling project ../flextunnel, the library this app wraps (crates/flextunnel-ffi, its JNI surface in src/android.rs), when needed; follow its AGENTS.md there (clippy, tests, Miri for the FFI's unsafe).
+- each ABI's libflextunnel.so is built on a host with the same CPU, never cross-arch: arm64-v8a on macvm, x86_64 on the x86 workstation. `scripts/run-device.sh` does it for the device's ABI (`CORE_BUILD_HOSTS` in .devtools.conf), then installs with `FLEXTUNNEL_LOCAL_JNILIBS=1`.
+- test on the development emulator (`emulator-5554` on the MBP's adb server, reached through FlexTunnel: `ANDROID_ADB_SERVER_PORT=15037`, see ../devtools/claude/android.md); it is relay-only, and has no multicast, so mDNS can only be checked on a real phone. `scripts/e2e.sh` is the end-to-end test against a throwaway server on debian-vm (docs/e2e.md).
+- `FlextunnelNative` must stay at `dev.flexaccess.flextunnel.FlextunnelNative` (the JNI symbol names encode it), and `FlextunnelNative.init` runs first, in `FlextunnelApplication.onCreate`.
+- every native call on a session handle goes through `TunnelService`'s one session thread; `stop` must never race another call.
+- logic that needs no Android API (model, validation rules, FFI JSON, snapshot decoding) goes in `:tunnelcore`, unit-tested on the JVM. Its `Rules` repeat the core's (route_table.rs, routed_set.rs, forwards.rs): keep them, and RulesTest, in step when the core's change.
+- the session is a `specialUse` foreground service with an ongoing notification — what keeps the SOCKS5 port and the forwards serving in the background. Don't move it to `dataSync` (capped at 6 h a day from Android 15).
+- after changes run `./gradlew :tunnelcore:test :app:testDebugUnitTest assembleDebug` (JDK 17).
+- give new controls a `Modifier.testTag`.

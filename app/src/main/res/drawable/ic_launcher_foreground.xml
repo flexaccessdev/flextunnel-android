@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The flextunnel-ios icon's globe (icon.svg), in the adaptive icon's safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:pathData="M54.0,21.0 L54.0,87.0 M21.0,54.0 L87.0,54.0" android:strokeColor="#FFFFFF" android:strokeWidth="3.2" android:strokeLineCap="round" android:fillColor="#00000000" />
+    <path android:pathData="M37.5,54.0 a16.5,33.0 0 1,0 33.0,0 a16.5,33.0 0 1,0 -33.0,0" android:strokeColor="#FFFFFF" android:strokeWidth="3.2" android:strokeLineCap="round" android:fillColor="#00000000" />
+    <path android:pathData="M21.0,54.0 a33.0,16.5 0 1,0 66.0,0 a33.0,16.5 0 1,0 -66.0,0" android:strokeColor="#FFFFFF" android:strokeWidth="3.2" android:strokeLineCap="round" android:fillColor="#00000000" />
+    <path android:pathData="M21.0,54.0 a33.0,33.0 0 1,0 66.0,0 a33.0,33.0 0 1,0 -66.0,0" android:strokeColor="#FFFFFF" android:strokeWidth="5.0" android:strokeLineCap="round" android:fillColor="#00000000" />
+</vector>
