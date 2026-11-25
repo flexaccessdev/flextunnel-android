@@ -24,8 +24,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.flexaccess.flextunnel.SessionManager
 
 /**
- * How to point a browser (or another app) at the session. The same content
- * as the repo's docs/socks5-browsers.md — keep the two in step.
+ * How to point a browser (or another app) at the session: the short version
+ * of the repo's docs/socks5-browsers.md — keep the two in step.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -74,6 +74,22 @@ object BrowserHelp {
                         "Names like <name>.localhost.flextunnel.internal and your destinations' routed " +
                         "domains only exist on the far side; looked up on the phone they fail.",
                     "Hosts no destination routes connect directly from the phone, as without the proxy.",
+                ),
+            ),
+        )
+        add(
+            Section(
+                "Firefox",
+                listOf(
+                    "Firefox has no proxy setting of its own: add the FoxyProxy Standard add-on from " +
+                        "addons.mozilla.org.",
+                    "In FoxyProxy's settings, Proxies → Add: type SOCKS5, hostname 127.0.0.1, port $port, " +
+                        "Proxy DNS on (the default), no username or password. Save.",
+                    "Then Menu → Extensions → FoxyProxy and pick the new proxy. Sites no destination routes " +
+                        "still connect directly.",
+                    "Right after Firefox starts, a page can load before the proxy is set (\"Address Not Found\"): " +
+                        "reload it.",
+                    "Chrome has no proxy setting or add-ons on Android: use Firefox, or a port forward.",
                 ),
             ),
         )

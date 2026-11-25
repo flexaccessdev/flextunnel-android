@@ -36,8 +36,8 @@ Point a client at `127.0.0.1:<port>` (SOCKS5, no password) with names resolved
 through the proxy (remote DNS / socks5h): `*.localhost.flextunnel.internal` and
 the routed domains exist only on the far side. Hosts no destination routes
 connect directly from the phone. Any app on the phone can use the proxy and the
-forwards while the session is on. Step-by-step browser setup is on the
-[roadmap](docs/roadmap.md).
+forwards while the session is on. Browser setup (Firefox + FoxyProxy), other
+apps and port forwards: [docs/socks5-browsers.md](docs/socks5-browsers.md).
 
 ## Build
 
