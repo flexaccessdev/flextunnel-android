@@ -1,5 +1,9 @@
 # Using the SOCKS5 proxy on Android
 
+> **Alpha.** The app still needs more testing, and it has no backward
+> compatibility while the version is 0.0.x: an update can drop your settings
+> without migrating them. See the [README](../README.md).
+
 While the session is on, the app runs a SOCKS5 proxy on the phone at
 `127.0.0.1:<port>` (1080 unless changed in **Settings**). It has no password
 and listens on loopback only, so only apps on the phone can use it. The in-app

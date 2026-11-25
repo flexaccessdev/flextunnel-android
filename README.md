@@ -9,11 +9,24 @@ SOCKS5-over-QUIC (iroh) tunnel. No VPN: other apps use it through
 - **port forwards**: local ports that each lead to one host and port.
 
 Both run in one session, a foreground service with an ongoing notification, so
-they keep serving while the app is in the background. Alpha; Android 14+
-(minSdk 34), arm64-v8a and x86_64.
+they keep serving while the app is in the background. Android 14+ (minSdk 34),
+arm64-v8a and x86_64.
+
+> **Alpha.** The app still needs more testing: so far it has run on the
+> emulator, and mDNS discovery and LAN paths have not been checked on a real
+> phone. Expect rough edges.
+>
+> **No backward compatibility.** While the version is 0.0.x, any release can
+> change the stored settings, keys and formats without migrating them. After
+> an update you may have to set the app up again (auth key, destinations,
+> forwards).
 
 The iOS client is [flextunnel-ios](https://github.com/flexaccessdev/flextunnel-ios).
-Unlike it, this app has no in-app browser.
+Unlike it, this app has no in-app browser, and doesn't need one. iOS browsers
+have no SOCKS5 proxy setting and no add-ons that could add one, so
+flextunnel-ios brings its own. On
+Android, Firefox can use the app's proxy through the FoxyProxy add-on
+([setup](docs/socks5-browsers.md)).
 
 ## Setup
 
