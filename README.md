@@ -23,8 +23,8 @@ arm64-v8a and x86_64.
 
 The iOS client is [flextunnel-ios](https://github.com/flexaccessdev/flextunnel-ios).
 Unlike it, this app has no in-app browser, and doesn't need one. iOS browsers
-have no SOCKS5 proxy setting and no add-ons that could add one, so
-flextunnel-ios brings its own. On
+have no SOCKS5 proxy setting, no add-ons that could add one, and no well-known
+browser app supports a SOCKS5 proxy, so flextunnel-ios brings its own. On
 Android, Firefox can use the app's proxy through the FoxyProxy add-on
 ([setup](docs/socks5-browsers.md)).
 
