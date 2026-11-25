@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The secrets (SecretStore) are encrypted under an AndroidKeyStore key, which
+  never leaves the device: copied anywhere else they can't be decrypted, and
+  the key list would stay unreadable. allowBackup="false" stops cloud backup
+  but not device-to-device transfer (targetSdk 31+), so exclude them from both.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="flextunnel-secrets.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="flextunnel-secrets.xml" />
+    </device-transfer>
+</data-extraction-rules>
