@@ -14,7 +14,7 @@ arm64-v8a and x86_64.
 
 > **Alpha.** The app still needs more testing: so far it has run on the
 > emulator, and mDNS discovery and LAN paths have not been checked on a real
-> phone. Expect rough edges.
+> phone.
 >
 > **No backward compatibility.** While the version is 0.0.x, any release can
 > change the stored settings, keys and formats without migrating them. After
