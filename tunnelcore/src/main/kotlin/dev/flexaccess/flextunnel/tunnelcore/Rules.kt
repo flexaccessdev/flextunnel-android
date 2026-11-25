@@ -46,6 +46,29 @@ object Rules {
         return id
     }
 
+    /**
+     * The 32 key bytes a well-formed node id spells (hex, or RFC 4648 base32
+     * without padding), so the two spellings of one server compare equal, as
+     * the core's parsed `EndpointId`s do. Null for anything else.
+     */
+    fun serverKey(raw: String): ByteArray? {
+        val id = raw.trim()
+        if (hex64.matches(id)) return ByteArray(32) { id.substring(2 * it, 2 * it + 2).toInt(16).toByte() }
+        if (!base32.matches(id)) return null
+        val out = java.io.ByteArrayOutputStream(32)
+        var buffer = 0
+        var bits = 0
+        for (c in id.uppercase()) {
+            buffer = (buffer shl 5) or (if (c in 'A'..'Z') c - 'A' else c - '2' + 26)
+            bits += 5
+            if (bits >= 8) {
+                bits -= 8
+                out.write((buffer shr bits) and 0xff)
+            }
+        }
+        return out.toByteArray()
+    }
+
     /** Split a rules field — one rule per line, or separated by commas or spaces. */
     fun splitRules(text: String): List<String> =
         text.split(',', ' ', '\n', '\t', '\r').map { it.trim() }.filter { it.isNotEmpty() }
@@ -103,7 +126,8 @@ object Rules {
         val cidrs = destination.routedCidrs.map { it.trim() }.filter { it.isNotEmpty() }
         val prefixes = cidrs.map { cidrRule(it) }
         others.firstOrNull { it.name == name }?.let { throw RuleException("Another destination is already named $name.") }
-        others.firstOrNull { it.serverNodeId.equals(nodeId, ignoreCase = true) }
+        val key = serverKey(nodeId)
+        others.firstOrNull { o -> serverKey(o.serverNodeId)?.contentEquals(key) == true }
             ?.let { throw RuleException("${it.name} already reaches that server.") }
         for (rule in domains) {
             others.firstOrNull { o -> o.routedDomains.any { domainKey(it) == rule } }

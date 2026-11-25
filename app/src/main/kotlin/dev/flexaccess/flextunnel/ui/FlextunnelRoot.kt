@@ -5,6 +5,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -51,11 +52,25 @@ private val stackSaver: Saver<List<Screen>, Any> = Saver(
 @Composable
 fun FlextunnelRoot(manager: SessionManager, onStart: () -> Unit) {
     var stack by rememberSaveable(stateSaver = stackSaver) { mutableStateOf(listOf<Screen>(Screen.Home)) }
+    // Each back-stack entry keeps its saved state (a Settings draft while Keys
+    // is open) until it is popped; a later visit then starts from the stores.
+    val states = rememberSaveableStateHolder()
+    fun entryKey(index: Int) = "$index:${Screen.save(stack[index])}"
     fun push(s: Screen) { stack = stack + s }
-    fun pop() { if (stack.size > 1) stack = stack.dropLast(1) }
+    fun pop() {
+        if (stack.size > 1) {
+            states.removeState(entryKey(stack.lastIndex))
+            stack = stack.dropLast(1)
+        }
+    }
     BackHandler(enabled = stack.size > 1) { pop() }
 
-    when (val screen = stack.last()) {
+    states.SaveableStateProvider(entryKey(stack.lastIndex)) { Content(manager, stack.last(), onStart, ::push, ::pop) }
+}
+
+@Composable
+private fun Content(manager: SessionManager, screen: Screen, onStart: () -> Unit, push: (Screen) -> Unit, pop: () -> Unit) {
+    when (screen) {
         Screen.Home -> HomeScreen(
             manager = manager,
             onStart = onStart,

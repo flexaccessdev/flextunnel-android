@@ -136,23 +136,28 @@ class E2eTest {
     /** A socket through the session's SOCKS5 proxy to [host]:[port], by name (the proxy resolves it). */
     private fun socks5Connect(host: String, port: Int): Socket {
         val s = Socket("127.0.0.1", SOCKS_PORT)
-        s.soTimeout = 60_000
-        val out = s.getOutputStream()
-        val input = DataInputStream(s.getInputStream())
-        out.write(byteArrayOf(5, 1, 0))
-        val choice = ByteArray(2).also { input.readFully(it) }
-        check(choice[0] == 5.toByte() && choice[1] == 0.toByte()) { "no-auth refused: ${choice.toList()}" }
-        val name = host.toByteArray()
-        out.write(byteArrayOf(5, 1, 0, 3, name.size.toByte()) + name + byteArrayOf((port shr 8).toByte(), port.toByte()))
-        val reply = ByteArray(4).also { input.readFully(it) }
-        check(reply[1] == 0.toByte()) { "CONNECT failed with code ${reply[1]}" }
-        val addressLength = when (reply[3].toInt()) {
-            1 -> 4
-            4 -> 16
-            3 -> input.readUnsignedByte()
-            else -> error("bad address type ${reply[3]}")
+        try {
+            s.soTimeout = 60_000
+            val out = s.getOutputStream()
+            val input = DataInputStream(s.getInputStream())
+            out.write(byteArrayOf(5, 1, 0))
+            val choice = ByteArray(2).also { input.readFully(it) }
+            check(choice[0] == 5.toByte() && choice[1] == 0.toByte()) { "no-auth refused: ${choice.toList()}" }
+            val name = host.toByteArray()
+            out.write(byteArrayOf(5, 1, 0, 3, name.size.toByte()) + name + byteArrayOf((port shr 8).toByte(), port.toByte()))
+            val reply = ByteArray(4).also { input.readFully(it) }
+            check(reply[1] == 0.toByte()) { "CONNECT failed with code ${reply[1]}" }
+            val addressLength = when (reply[3].toInt()) {
+                1 -> 4
+                4 -> 16
+                3 -> input.readUnsignedByte()
+                else -> error("bad address type ${reply[3]}")
+            }
+            input.readFully(ByteArray(addressLength + 2))
+        } catch (e: Exception) {
+            s.close()
+            throw e
         }
-        input.readFully(ByteArray(addressLength + 2))
         return s
     }
 

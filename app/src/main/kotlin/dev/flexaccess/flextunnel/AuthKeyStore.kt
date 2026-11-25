@@ -32,6 +32,9 @@ class AuthKeyStore(private val secrets: SecretStore) {
      */
     private var loadError: String? = null
 
+    /** Stored records whose public key didn't derive on load: preserved verbatim on every write. */
+    private val unreadable = ArrayList<JSONObject>()
+
     init {
         val json = try {
             secrets.get(KEY_LIST)
@@ -46,18 +49,21 @@ class AuthKeyStore(private val secrets: SecretStore) {
                 loadError = "The stored key list couldn't be decoded. Keys can't be changed until it can be read."
             } else {
                 val stored = (0 until parsed.length()).mapNotNull { parsed.optJSONObject(it) }
-                // A record whose secret no longer derives a public key is corrupt —
-                // drop it from the view rather than carry an entry that can never
-                // connect. Nothing is written back here: the derivation goes
-                // through the native library, and a transient failure there must
-                // not delete stored keys. The pruned list lands on disk with the
-                // next user-driven add/rename/delete.
-                _keys.value = stored.mapNotNull { obj ->
+                // A record whose secret doesn't derive a public key is left out of
+                // the view (it can't connect), but kept as stored and written back
+                // unchanged: the derivation goes through the native library, and a
+                // transient failure there must not delete a stored key.
+                val loaded = ArrayList<Key>()
+                for (obj in stored) {
                     val secret = obj.optString("secret", "")
-                    AuthKey.publicKey(secret)?.let {
-                        Key(obj.optString("id"), obj.optString("name", "Unnamed"), secret, it)
+                    val publicKey = AuthKey.publicKey(secret)
+                    if (publicKey == null) {
+                        unreadable += obj
+                    } else {
+                        loaded += Key(obj.optString("id"), obj.optString("name", "Unnamed"), secret, publicKey)
                     }
                 }
+                _keys.value = loaded
             }
         }
     }
@@ -141,6 +147,7 @@ class AuthKeyStore(private val secrets: SecretStore) {
     private fun persist(): String? {
         loadError?.let { return it }
         val array = JSONArray()
+        unreadable.forEach { array.put(it) }
         _keys.value.forEach {
             array.put(JSONObject().put("id", it.id).put("name", it.name).put("secret", it.secret))
         }

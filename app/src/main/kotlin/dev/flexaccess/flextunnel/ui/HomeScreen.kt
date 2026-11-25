@@ -137,8 +137,11 @@ fun HomeScreen(
                     onEdit = { onEditForward(forward.id) },
                     onToggle = { enabled ->
                         scope.launch {
-                            val message = withContext(Dispatchers.IO) { manager.profiles.setForwardEnabled(forward.id, enabled) }
-                            if (message != null) error = message else manager.applyForwards()
+                            // Applied with the write, so leaving the screen can't skip it.
+                            val message = withContext(Dispatchers.IO) {
+                                manager.profiles.setForwardEnabled(forward.id, enabled).also { if (it == null) manager.applyForwards() }
+                            }
+                            if (message != null) error = message
                         }
                     },
                 )

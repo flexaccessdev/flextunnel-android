@@ -1,6 +1,8 @@
 package dev.flexaccess.flextunnel
 
 import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -17,20 +19,27 @@ class MainActivity : ComponentActivity() {
         val manager = SessionManager.get(this)
         setContent {
             FlextunnelTheme {
-                // The session's notification needs POST_NOTIFICATIONS (Android
-                // 13+). Asked on the first start; the session runs either way —
-                // a denied permission only hides the notification.
-                val askNotifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+                // Asked before a start, both optional — the session runs either
+                // way: POST_NOTIFICATIONS (Android 13+) only shows its
+                // notification; ACCESS_LOCAL_NETWORK (Android 17, targetSdk 37)
+                // allows mDNS, direct LAN paths and SOCKS5 to LAN hosts —
+                // without it everything goes through relays.
+                val askPermissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
                     manager.start()
                 }
                 FlextunnelRoot(manager = manager, onStart = {
-                    if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                        manager.start()
-                    } else {
-                        askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
-                    }
+                    val missing = PERMISSIONS.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+                    if (missing.isEmpty()) manager.start() else askPermissions.launch(missing.toTypedArray())
                 })
             }
+        }
+    }
+
+    private companion object {
+        /** ACCESS_LOCAL_NETWORK exists from Android 17; earlier, INTERNET covers the local network. */
+        val PERMISSIONS = buildList {
+            add(Manifest.permission.POST_NOTIFICATIONS)
+            if (Build.VERSION.SDK_INT >= 37) add(Manifest.permission.ACCESS_LOCAL_NETWORK)
         }
     }
 }

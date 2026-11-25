@@ -74,8 +74,8 @@ sudo systemd-run --quiet --unit flextunnel-e2e-http --uid "$(id -u)" --gid "$(id
   python -m http.server "$port" --bind 127.0.0.1 --directory "$D/www"
 # Ready once the server prints its id and the HTTP server answers.
 for _ in $(seq 60); do
-  if sudo journalctl -u flextunnel-e2e --no-pager -o cat | grep -q 'Node ID' &&
-     curl -fsS -o /dev/null "http://127.0.0.1:$port/"; then
+  if sudo journalctl -u flextunnel-e2e --no-pager -o cat | grep "Node ID" >/dev/null &&
+     curl -fsS --max-time 3 -o /dev/null "http://127.0.0.1:$port/"; then
     cat "$D/endpoint_id"; exit 0
   fi
   sleep 1

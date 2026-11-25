@@ -21,6 +21,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ProcessLifecycleOwner
 import dev.flexaccess.flextunnel.tunnelcore.Snapshots
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 
 /**
  * The session's foreground service. While it runs, the SOCKS5 proxy on its
@@ -60,7 +61,7 @@ class TunnelService : Service() {
         }
     }
 
-    private val pollTick = Runnable { session.execute { poll() } }
+    private val pollTick = Runnable { onSession { poll() } }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -87,7 +88,7 @@ class TunnelService : Service() {
                     notification("Starting…"),
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
                 )
-                session.execute { startSession() }
+                onSession { startSession() }
             }
         }
         // A session the system ended stays ended: the user starts it again.
@@ -97,17 +98,23 @@ class TunnelService : Service() {
     override fun onDestroy() {
         main.removeCallbacks(pollTick)
         ProcessLifecycleOwner.get().lifecycle.removeObserver(lifecycleObserver)
+        // Before the session thread goes: no network callback should be left to
+        // hand it work (one already in flight is dropped by onSession).
+        releaseSystemHooks()
         // Synchronous: the process may go right after.
         runCatching { session.submit { stopNative() }.get() }
         session.shutdown()
-        releaseSystemHooks()
+        // Ended without stopSession or fail (the system stopped it): don't leave
+        // the UI at Starting/Running. A terminal state already reported stays.
+        val state = manager.state.value
+        if (state is SessionState.Starting || state is SessionState.Running) manager.reportState(SessionState.Stopped)
         if (manager.service === this) manager.service = null
         super.onDestroy()
     }
 
     /** Stop the session and the service. */
     fun stopSession() {
-        session.execute {
+        onSession {
             stopNative()
             main.post {
                 releaseSystemHooks()
@@ -120,7 +127,7 @@ class TunnelService : Service() {
 
     /** Stop and start again, with the stores as they are now. */
     fun restart() {
-        session.execute {
+        onSession {
             stopNative()
             main.post { manager.reportState(SessionState.Starting) }
             startSession()
@@ -129,8 +136,8 @@ class TunnelService : Service() {
 
     /** Hand the current forward set to the running session. */
     fun applyForwards() {
-        session.execute {
-            if (handle == 0L) return@execute
+        onSession {
+            if (handle == 0L) return@onSession
             pushForwards()
             poll(reschedule = false)
             val running = SessionState.Running(manager.profiles.settings.value.takeIf { it.socksEnabled }?.socksPort)
@@ -144,6 +151,26 @@ class TunnelService : Service() {
     }.getOrNull()
 
     // --- On the session thread -------------------------------------------
+
+    /**
+     * Run [block] on the session thread. Whatever it throws (the library's
+     * IllegalStateException, a snapshot that doesn't decode) ends the session
+     * through [fail] rather than escaping and killing the process. Work
+     * handed over after [onDestroy] shut the thread down is dropped: there is
+     * no session left for it.
+     */
+    private fun onSession(block: () -> Unit) {
+        try {
+            session.execute {
+                try {
+                    block()
+                } catch (e: Exception) {
+                    fail("The session failed: ${e.message ?: e.javaClass.simpleName}")
+                }
+            }
+        } catch (_: RejectedExecutionException) {
+        }
+    }
 
     private fun startSession() {
         if (handle != 0L) return
@@ -206,7 +233,8 @@ class TunnelService : Service() {
 
     private fun fail(message: String) {
         Log.w(TAG, message)
-        stopNative()
+        // Already failing: a throwing stop must not escape the session thread.
+        runCatching { stopNative() }
         main.post {
             releaseSystemHooks()
             manager.reportState(SessionState.Failed(message))
@@ -219,7 +247,7 @@ class TunnelService : Service() {
 
     private fun setVisible(value: Boolean) {
         visible = value
-        session.execute {
+        onSession {
             if (handle != 0L) FlextunnelNative.setBackground(handle, !value)
             if (value) poll()
         }
@@ -241,7 +269,7 @@ class TunnelService : Service() {
 
                 override fun onLost(network: Network) = report(cm.activeNetwork != null)
 
-                private fun report(available: Boolean) = session.execute {
+                private fun report(available: Boolean) = onSession {
                     if (handle != 0L) FlextunnelNative.setNetworkAvailable(handle, available)
                 }
             }

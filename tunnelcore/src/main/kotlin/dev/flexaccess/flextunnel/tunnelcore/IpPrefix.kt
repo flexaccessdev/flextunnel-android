@@ -23,9 +23,13 @@ object IpLiteral {
                 if (octets.all { it in 0..255 }) ByteArray(4) { octets[it].toByte() } else null
             }
             // An IPv4-mapped literal ("::ffff:1.2.3.4") comes back as an
-            // Inet4Address on the JVM: accept whatever family Java decides.
+            // Inet4Address on the JVM; the core (Rust's IpAddr) keeps it IPv6,
+            // so it is rebuilt as its 16 bytes — "::ffff:192.0.2.0/120" is a
+            // valid IPv6 network, and it routes as IPv6, not as 1.2.3.4.
             text.contains(':') && v6Shape.matches(text) ->
-                runCatching { InetAddress.getByName(text).address }.getOrNull()
+                runCatching { InetAddress.getByName(text).address }.getOrNull()?.let { bytes ->
+                    if (bytes.size == 4) ByteArray(10) + byteArrayOf(-1, -1) + bytes else bytes
+                }
             else -> null
         }
     }

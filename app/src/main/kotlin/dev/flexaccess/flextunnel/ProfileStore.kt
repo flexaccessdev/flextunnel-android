@@ -114,16 +114,27 @@ class ProfileStore(context: Context, private val secrets: SecretStore) {
         } catch (e: SecretStoreException) {
             return "Couldn't save the relay token: ${e.message}"
         }
+        return writeSettings(valid)
+    }
+
+    /** Select the auth key the session uses; the relay token stays as stored. */
+    @Synchronized
+    fun selectAuthKey(id: String?): String? {
+        val valid = try {
+            Rules.settings(_settings.value.copy(authKeyId = id), _forwards.value)
+        } catch (e: RuleException) {
+            return e.message
+        }
+        return writeSettings(valid)
+    }
+
+    private fun writeSettings(valid: SessionSettings): String? {
         if (!prefs.edit().putString(KEY_SETTINGS, valid.toJson().toString()).commit()) {
             return "Couldn't save the settings."
         }
         _settings.value = valid
         return null
     }
-
-    /** Select the auth key the session uses. */
-    @Synchronized
-    fun selectAuthKey(id: String?): String? = saveSettings(_settings.value.copy(authKeyId = id), relayToken())
 
     private fun writeDestinations(next: List<Destination>): String? {
         if (!prefs.edit().putString(KEY_DESTINATIONS, JSONArray(next.map { it.toJson() }).toString()).commit()) {

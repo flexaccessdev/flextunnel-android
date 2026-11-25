@@ -78,13 +78,12 @@ fun SettingsScreen(manager: SessionManager, onKeys: () -> Unit, onDone: () -> Un
             error = e.message
             return@launch
         }
-        val message = withContext(Dispatchers.IO) { manager.profiles.saveSettings(settings, token) }
-        if (message != null) {
-            error = message
-        } else {
-            manager.restartIfRunning()
-            onDone()
+        // The restart rides with the write: leaving the screen mid-save cancels
+        // this coroutine, never a saved change's restart.
+        val message = withContext(Dispatchers.IO) {
+            manager.profiles.saveSettings(settings, token).also { if (it == null) manager.restartIfRunning() }
         }
+        if (message != null) error = message else onDone()
     }
 
     Scaffold(

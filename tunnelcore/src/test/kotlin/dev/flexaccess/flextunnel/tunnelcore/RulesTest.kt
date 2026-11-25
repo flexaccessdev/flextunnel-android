@@ -40,11 +40,26 @@ class RulesTest {
         assertThrows(RuleException::class.java) { Rules.cidrRule("nope") }
     }
 
+    @Test fun ipv4MappedRangesStayIpv6() {
+        // Rust's IpNetwork reads it as an IPv6 /120, not as 192.0.2.0 with a bad length.
+        assertEquals("::ffff:c000:200/120", Rules.cidrRule("::ffff:192.0.2.0/120").toString())
+        assertEquals("10.0.0.0/8", Rules.cidrRule("10.0.0.0/8").toString())
+        assertFalse("a mapped address is IPv6: 10.0.0.0/8 doesn't route it", Rules.routes("::ffff:10.1.2.3", listOf(m1)))
+    }
+
     @Test fun destinationsDoNotShareNamesServersOrRules() {
         val other = Destination("2", "m2", "b".repeat(64))
         Rules.destination(other, listOf(m1))
         assertThrows(RuleException::class.java) { Rules.destination(other.copy(name = "M1"), listOf(m1)) }
         assertThrows(RuleException::class.java) { Rules.destination(other.copy(serverNodeId = node.uppercase()), listOf(m1)) }
+        // The same key in its base32 spelling is the same server; another key in base32 is not.
+        assertThrows(RuleException::class.java) {
+            Rules.destination(other.copy(serverNodeId = "vkvkvkvkvkvkvkvkvkvkvkvkvkvkvkvkvkvkvkvkvkvkvkvkvkva"), listOf(m1))
+        }
+        Rules.destination(other.copy(serverNodeId = "xo53xo53xo53xo53xo53xo53xo53xo53xo53xo53xo53xo53xo5q"), listOf(m1))
+        assertThrows(RuleException::class.java) {
+            Rules.destination(other, listOf(m1.copy(serverNodeId = "XO53XO53XO53XO53XO53XO53XO53XO53XO53XO53XO53XO53XO5Q")))
+        }
         assertThrows(RuleException::class.java) { Rules.destination(other.copy(routedDomains = listOf("db.internal")), listOf(m1)) }
         assertThrows(RuleException::class.java) { Rules.destination(other.copy(routedCidrs = listOf("10.0.0.0/8")), listOf(m1)) }
     }

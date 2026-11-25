@@ -42,13 +42,10 @@ val fetchFlextunnelJniLibs by tasks.registering {
                 "scripts/bump-jnilibs.sh <tag> to pin a published flextunnel release, " +
                 "or build ../flextunnel with ./build-android.sh and set FLEXTUNNEL_LOCAL_JNILIBS=1."
         }
+        // No shortcut on a stamp: Gradle reruns this only when the inputs or the
+        // outputs changed, and a changed output (a deleted .so) must be restored.
         val dir = outDir.get().asFile
         val stamp = dir.resolve("sha256.txt")
-        if (stamp.isFile && stamp.readText().trim() == sha256 &&
-            dir.resolve("jniLibs").isDirectory
-        ) {
-            return@doLast
-        }
         dir.deleteRecursively()
         dir.mkdirs()
         logger.lifecycle("Downloading $url")

@@ -70,11 +70,20 @@ private fun FormScaffold(title: String, onBack: () -> Unit, onSave: () -> Unit, 
 }
 
 @Composable
-private fun Field(value: String, onChange: (String) -> Unit, label: String, tag: String, number: Boolean = false, singleLine: Boolean = true) {
+private fun Field(
+    value: String,
+    onChange: (String) -> Unit,
+    label: String,
+    tag: String,
+    number: Boolean = false,
+    singleLine: Boolean = true,
+    enabled: Boolean = true,
+) {
     OutlinedTextField(
         value = value,
         onValueChange = onChange,
         label = { Text(label) },
+        enabled = enabled,
         singleLine = singleLine,
         minLines = if (singleLine) 1 else 2,
         keyboardOptions = if (number) KeyboardOptions(keyboardType = KeyboardType.Number) else KeyboardOptions.Default,
@@ -103,13 +112,12 @@ fun DestinationEditScreen(manager: SessionManager, id: String?, onDone: () -> Un
             routedDomains = Rules.splitRules(domains),
             routedCidrs = Rules.splitRules(cidrs),
         )
-        val message = withContext(Dispatchers.IO) { manager.profiles.saveDestination(destination) }
-        if (message != null) {
-            error = message
-        } else {
-            manager.restartIfRunning()
-            onDone()
+        // The restart rides with the write: leaving the screen mid-save cancels
+        // this coroutine, never a saved change's restart.
+        val message = withContext(Dispatchers.IO) {
+            manager.profiles.saveDestination(destination).also { if (it == null) manager.restartIfRunning() }
         }
+        if (message != null) error = message else onDone()
     }
 
     FormScaffold(if (existing == null) "Add destination" else "Edit destination", onBack = onDone, onSave = { save() }) {
@@ -121,15 +129,19 @@ fun DestinationEditScreen(manager: SessionManager, id: String?, onDone: () -> Un
             "Further hosts the SOCKS5 proxy and the forwards send through this server — the server must route " +
                 "them too. One per line. Anything routed nowhere connects directly from the phone (SOCKS5 only).",
         )
-        Field(domains, { domains = it }, "Domains: name, *.suffix or *", "domains", singleLine = false)
-        Field(cidrs, { cidrs = it }, "IP ranges: 10.0.0.0/8, one address", "cidrs", singleLine = false)
+        // Locked while the server is asked: its answer replaces them.
+        Field(domains, { domains = it }, "Domains: name, *.suffix or *", "domains", singleLine = false, enabled = !fetching)
+        Field(cidrs, { cidrs = it }, "IP ranges: 10.0.0.0/8, one address", "cidrs", singleLine = false, enabled = !fetching)
         OutlinedButton(
             enabled = !fetching && nodeId.isNotBlank(),
             onClick = {
                 fetching = true
+                val requested = nodeId
                 scope.launch {
-                    val result = withContext(Dispatchers.IO) { manager.fetchServerRoutes(nodeId) }
+                    val result = withContext(Dispatchers.IO) { manager.fetchServerRoutes(requested) }
                     fetching = false
+                    // The answer is for the id asked about; dropped if it was edited since.
+                    if (nodeId != requested) return@launch
                     result.onSuccess { (d, c) ->
                         domains = d.joinToString("\n")
                         cidrs = c.joinToString("\n")
@@ -151,8 +163,10 @@ fun DestinationEditScreen(manager: SessionManager, id: String?, onDone: () -> Un
                 TextButton(onClick = {
                     confirmDelete = false
                     scope.launch {
-                        val message = withContext(Dispatchers.IO) { manager.profiles.deleteDestination(existing.id) }
-                        if (message != null) error = message else { manager.restartIfRunning(); onDone() }
+                        val message = withContext(Dispatchers.IO) {
+                            manager.profiles.deleteDestination(existing.id).also { if (it == null) manager.restartIfRunning() }
+                        }
+                        if (message != null) error = message else onDone()
                     }
                 }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
             },
@@ -190,13 +204,10 @@ fun ForwardEditScreen(manager: SessionManager, id: String?, onDone: () -> Unit) 
             error = e.message
             return@launch
         }
-        val message = withContext(Dispatchers.IO) { manager.profiles.saveForward(forward) }
-        if (message != null) {
-            error = message
-        } else {
-            manager.applyForwards()
-            onDone()
+        val message = withContext(Dispatchers.IO) {
+            manager.profiles.saveForward(forward).also { if (it == null) manager.applyForwards() }
         }
+        if (message != null) error = message else onDone()
     }
 
     FormScaffold(if (existing == null) "Add port forward" else "Edit port forward", onBack = onDone, onSave = { save() }) {
@@ -218,8 +229,10 @@ fun ForwardEditScreen(manager: SessionManager, id: String?, onDone: () -> Unit) 
         if (existing != null) {
             TextButton(onClick = {
                 scope.launch {
-                    val message = withContext(Dispatchers.IO) { manager.profiles.deleteForward(existing.id) }
-                    if (message != null) error = message else { manager.applyForwards(); onDone() }
+                    val message = withContext(Dispatchers.IO) {
+                        manager.profiles.deleteForward(existing.id).also { if (it == null) manager.applyForwards() }
+                    }
+                    if (message != null) error = message else onDone()
                 }
             }) { Text("Delete forward", color = MaterialTheme.colorScheme.error) }
         }
