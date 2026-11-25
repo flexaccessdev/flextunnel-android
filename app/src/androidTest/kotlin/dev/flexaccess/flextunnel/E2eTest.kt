@@ -22,8 +22,8 @@ import java.net.Socket
 /**
  * The session end to end, on a device, against a real server: the SOCKS5
  * proxy on its fixed port and a port forward, each fetching a page from an
- * HTTP server on that server's loopback, over whatever path iroh finds (the
- * development emulator is relay-only). Driven by scripts/e2e.sh, which sets
+ * HTTP server on that server's loopback, over whatever path iroh finds
+ * (direct or through a relay). Driven by scripts/e2e.sh, which sets
  * up the throwaway server and passes its details as instrumentation
  * arguments: `serverNodeId`, `authKey` (an authorized `ed25519-sec:` key),
  * `targetPort` (the HTTP server's port on the server's loopback). Without them
@@ -69,8 +69,8 @@ class E2eTest {
     @Test
     fun socksAndForwardReachTheServersLoopback() {
         startAndWait()
-        // The first request connects the destination (through a relay on the
-        // emulator), so it gets the long timeout.
+        // The first request connects the destination (and may wait on a
+        // relay or a hole punch), so it gets the long timeout.
         val viaForward = retry(90_000) { httpGet(Socket("127.0.0.1", FORWARD_PORT)) }
         assertTrue("forward answer: $viaForward", viaForward.startsWith("HTTP/1.0 200"))
         val viaSocks = retry(30_000) { httpGet(socks5Connect(targetHost, targetPort)) }

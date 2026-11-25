@@ -14,7 +14,8 @@ for that server, turns the SOCKS5 proxy on at `127.0.0.1:1080`, adds a forward
 `18080 → e2e.localhost.flextunnel.internal:<port>`, starts the session, and
 fetches the page both ways — through the forward, and with a raw SOCKS5
 CONNECT by name. A second test holds port 1080 itself and checks that the start
-fails. The emulator's networking is relay-only, so the path is always a relay.
+fails. The path is whatever iroh finds: from the emulator that is usually direct,
+through the router's public address, with a relay as the fallback.
 
 ```sh
 export ANDROID_ADB_SERVER_PORT=15037 ADB_SERIAL=emulator-5554
