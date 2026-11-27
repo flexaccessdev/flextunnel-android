@@ -19,6 +19,21 @@ class FfiJsonTest {
         assertEquals("t", off.getString("relay_auth_token"))
     }
 
+    /** The core refuses the QUIC address discovery setting with the default relays, so it goes only with custom ones. */
+    @Test fun quicAddrDiscoveryGoesOnlyWithCustomRelays() {
+        val defaults = SessionSettings(relayQuicAddrDiscovery = false)
+        assertTrue(JSONObject(FfiJson.config("k", defaults, null, listOf(dest))).isNull("relay_quic_addr_discovery"))
+        assertTrue(JSONObject(FfiJson.routesRequest("k", "n", defaults, null)).isNull("relay_quic_addr_discovery"))
+        val custom = SessionSettings(relayUrls = listOf("https://r/"))
+        for (on in listOf(true, false)) {
+            val s = custom.copy(relayQuicAddrDiscovery = on)
+            assertEquals(on, JSONObject(FfiJson.config("k", s, "t", listOf(dest))).getBoolean("relay_quic_addr_discovery"))
+            val req = JSONObject(FfiJson.routesRequest("k", "n", s, "t"))
+            assertEquals(on, req.getBoolean("relay_quic_addr_discovery"))
+            assertEquals("https://r/", req.getJSONArray("relay_urls").getString(0))
+        }
+    }
+
     @Test fun forwardsKeepDisabledEntries() {
         val json = JSONArray(FfiJson.forwards(listOf(PortForward("f", "ssh", 2222, "h", 22, enabled = false))))
         assertEquals(false, json.getJSONObject(0).getBoolean("enabled"))
@@ -28,7 +43,7 @@ class FfiJsonTest {
         assertEquals(dest, Destination.fromJson(dest.toJson()))
         val f = PortForward("f", "ssh", 2222, "h", 22, enabled = false)
         assertEquals(f, PortForward.fromJson(f.toJson()))
-        val s = SessionSettings(false, 1090, listOf("https://r/"), "k")
+        val s = SessionSettings(false, 1090, listOf("https://r/"), relayQuicAddrDiscovery = false, authKeyId = "k")
         assertEquals(s, SessionSettings.fromJson(s.toJson()))
         assertEquals(SessionSettings(authKeyId = null), SessionSettings.fromJson(SessionSettings().toJson()))
     }

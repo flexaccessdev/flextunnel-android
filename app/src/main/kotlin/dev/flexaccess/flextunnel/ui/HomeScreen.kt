@@ -239,7 +239,7 @@ private fun SessionCard(
 @Composable
 private fun DestinationRow(destination: Destination, status: DestinationStatus?, onEdit: () -> Unit, onPath: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onEdit).padding(vertical = 10.dp),
+        Modifier.fillMaxWidth().clickable(onClick = onEdit).padding(vertical = 10.dp).testTag("destination-${destination.name}"),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         StatusDot(stateColor(status?.state ?: "idle"))
@@ -250,6 +250,7 @@ private fun DestinationRow(destination: Destination, status: DestinationStatus?,
                 status?.let { describe(it) } ?: destination.loopbackHost,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag("destinationState-${destination.name}"),
             )
         }
         if (status?.state == "connected") {
@@ -290,6 +291,7 @@ private fun ForwardRow(forward: PortForward, status: ForwardStatus?, onEdit: () 
                     text,
                     style = MaterialTheme.typography.bodySmall,
                     color = if (status.state == "failed") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.testTag("forwardStatus-${forward.id}"),
                 )
             }
         }

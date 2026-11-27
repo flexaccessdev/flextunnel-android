@@ -87,9 +87,8 @@ class SessionManager(private val context: Context) {
      */
     fun fetchServerRoutes(serverNodeId: String): Result<Pair<List<String>, List<String>>> = runCatching {
         val key = selectedSecret() ?: throw IllegalStateException(NO_KEY)
-        val settings = profiles.settings.value
         val json = FlextunnelNative.fetchServerRoutes(
-            FfiJson.routesRequest(key, serverNodeId.trim(), settings.relayUrls, profiles.relayToken()),
+            FfiJson.routesRequest(key, serverNodeId.trim(), profiles.settings.value, profiles.relayToken()),
         )
         Snapshots.serverRoutes(json)
     }

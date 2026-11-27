@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -39,6 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -62,6 +64,7 @@ fun SettingsScreen(manager: SessionManager, onKeys: () -> Unit, onDone: () -> Un
     var socksPort by rememberSaveable { mutableStateOf(saved.socksPort.toString()) }
     var relays by rememberSaveable { mutableStateOf(saved.relayUrls.joinToString("\n")) }
     var token by rememberSaveable { mutableStateOf(manager.profiles.relayToken() ?: "") }
+    var quicAddrDiscovery by rememberSaveable { mutableStateOf(saved.relayQuicAddrDiscovery) }
     var keyMenu by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -73,6 +76,7 @@ fun SettingsScreen(manager: SessionManager, onKeys: () -> Unit, onDone: () -> Un
                 socksEnabled = socksEnabled,
                 socksPort = Rules.port(socksPort, "SOCKS5 port"),
                 relayUrls = Rules.splitRules(relays),
+                relayQuicAddrDiscovery = quicAddrDiscovery,
             )
         } catch (e: RuleException) {
             error = e.message
@@ -140,15 +144,43 @@ fun SettingsScreen(manager: SessionManager, onKeys: () -> Unit, onDone: () -> Un
                 onValueChange = { relays = it },
                 label = { Text("Custom relay URLs, one per line (empty: defaults)") },
                 minLines = 2,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().testTag("relayUrls"),
             )
+            Footnote("Two or more for failover; a single relay works, with nothing to fall back on.")
             OutlinedTextField(
                 value = token,
                 onValueChange = { token = it },
                 label = { Text("Relay auth token (custom relays only)") },
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().testTag("relayToken"),
+            )
+            // As save parses it: a field of separators only is the default relays.
+            val customRelays = Rules.splitRules(relays).isNotEmpty()
+            // The whole row toggles, so TalkBack names the switch by its label.
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .toggleable(
+                        value = quicAddrDiscovery,
+                        enabled = customRelays,
+                        role = Role.Switch,
+                        onValueChange = { quicAddrDiscovery = it },
+                    )
+                    .testTag("relayQuicAddrDiscovery"),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("QUIC address discovery", modifier = Modifier.weight(1f))
+                Switch(checked = quicAddrDiscovery, onCheckedChange = null, enabled = customRelays)
+            }
+            Footnote(
+                if (customRelays) {
+                    "Whether the custom relays serve it, all of them or none. Turn it off for relays behind a " +
+                        "Cloudflare Tunnel or another HTTP-only front, which otherwise delay each start by up to " +
+                        "3 s. Set it the same on the server."
+                } else {
+                    "Custom relays only; the default relays keep their own."
+                },
             )
 
             SectionTitle("Background")

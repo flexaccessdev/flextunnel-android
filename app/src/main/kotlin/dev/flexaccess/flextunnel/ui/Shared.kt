@@ -17,6 +17,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 
 /** The dot color for a destination's core state (idle, connecting, connected, backoff, failed). */
@@ -53,7 +54,7 @@ fun ErrorDialog(message: String?, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Can't do that") },
-        text = { Text(message) },
+        text = { Text(message, modifier = Modifier.testTag("errorMessage")) },
         confirmButton = { TextButton(onClick = onDismiss) { Text("OK") } },
     )
 }

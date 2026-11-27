@@ -79,17 +79,23 @@ data class PortForward(
  * — a fixed port, so a browser or extension configured once keeps working —
  * while [socksEnabled]; the port must be free when the session starts.
  * [relayUrls] empty means FlexTunnel's default relays.
+ * [relayQuicAddrDiscovery] says whether the custom relays serve QUIC address
+ * discovery, all of them or none: off for relays behind a Cloudflare Tunnel or
+ * another HTTP-only front, which otherwise delay each start by up to 3 s. It
+ * only applies to custom relays; the default relays keep iroh's own.
  */
 data class SessionSettings(
     val socksEnabled: Boolean = true,
     val socksPort: Int = DEFAULT_SOCKS_PORT,
     val relayUrls: List<String> = emptyList(),
+    val relayQuicAddrDiscovery: Boolean = true,
     val authKeyId: String? = null,
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("socks_enabled", socksEnabled)
         .put("socks_port", socksPort)
         .put("relay_urls", JSONArray(relayUrls))
+        .put("relay_quic_addr_discovery", relayQuicAddrDiscovery)
         .put("auth_key_id", authKeyId ?: JSONObject.NULL)
 
     companion object {
@@ -99,6 +105,7 @@ data class SessionSettings(
             socksEnabled = obj.optBoolean("socks_enabled", true),
             socksPort = obj.optInt("socks_port", DEFAULT_SOCKS_PORT),
             relayUrls = obj.optJSONArray("relay_urls").strings(),
+            relayQuicAddrDiscovery = obj.optBoolean("relay_quic_addr_discovery", true),
             authKeyId = if (obj.isNull("auth_key_id")) null else obj.optString("auth_key_id"),
         )
     }
@@ -115,8 +122,7 @@ object FfiJson {
     ): String = JSONObject()
         .put("auth_key", authKey)
         .put("socks_port", if (settings.socksEnabled) settings.socksPort else JSONObject.NULL)
-        .put("relay_urls", JSONArray(settings.relayUrls))
-        .put("relay_auth_token", relayAuthToken?.takeIf { it.isNotEmpty() } ?: JSONObject.NULL)
+        .putRelays(settings, relayAuthToken)
         .put(
             "destinations",
             JSONArray(
@@ -143,14 +149,26 @@ object FfiJson {
         },
     ).toString()
 
-    /** `fetchServerRoutes`' request. */
-    fun routesRequest(authKey: String, serverNodeId: String, relayUrls: List<String>, relayAuthToken: String?): String =
+    /** `fetchServerRoutes`' request, with the session's relays. */
+    fun routesRequest(authKey: String, serverNodeId: String, settings: SessionSettings, relayAuthToken: String?): String =
         JSONObject()
             .put("auth_key", authKey)
             .put("server_node_id", serverNodeId)
-            .put("relay_urls", JSONArray(relayUrls))
-            .put("relay_auth_token", relayAuthToken?.takeIf { it.isNotEmpty() } ?: JSONObject.NULL)
+            .putRelays(settings, relayAuthToken)
             .toString()
+
+    /**
+     * The relay keys both documents share. The core refuses a QUIC address
+     * discovery setting, either value, with the default relays, so it is only
+     * sent with custom ones.
+     */
+    private fun JSONObject.putRelays(settings: SessionSettings, relayAuthToken: String?): JSONObject = this
+        .put("relay_urls", JSONArray(settings.relayUrls))
+        .put("relay_auth_token", relayAuthToken?.takeIf { it.isNotEmpty() } ?: JSONObject.NULL)
+        .put(
+            "relay_quic_addr_discovery",
+            if (settings.relayUrls.isEmpty()) JSONObject.NULL else settings.relayQuicAddrDiscovery,
+        )
 }
 
 internal fun JSONArray?.strings(): List<String> =
