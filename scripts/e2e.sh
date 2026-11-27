@@ -53,13 +53,23 @@ for tool in uv curl; do command -v "$tool" >/dev/null || die "$tool not found"; 
 
 # One run at a time, before anything under build/e2e is touched: a run
 # replaces build/e2e/run, which a running one's servers read their identity
-# and keys from (and both would share the device). An flock on fd 9 (through
-# perl: macOS has no flock(1)), held until this shell exits; what it starts
-# gets fd 9 closed, so a leftover child can't keep the lock.
+# and keys from (and both would share the device). An flock on fd 9, taken by
+# uv's Python (macOS has no flock(1)) and held until this shell exits; what it
+# starts gets fd 9 closed, so a leftover child can't keep the lock.
 mkdir -p "$WORK"
 exec 9>"$WORK/lock"
-perl -MFcntl=:flock -e 'open(my $fh, ">&=", 9) or die "fd 9: $!\n"; flock($fh, LOCK_EX | LOCK_NB) or exit 1' ||
-  die "another e2e run is using $WORK"
+lock_status=0
+uv run --no-project python -c '
+import fcntl, sys
+try:
+    fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except BlockingIOError:
+    sys.exit(75)' || lock_status=$?
+case $lock_status in
+  0) ;;
+  75) die "another e2e run is using $WORK" ;;
+  *) die "could not lock $WORK/lock" ;;
+esac
 
 case "$(uname -s)/$(uname -m)" in
   Linux/x86_64) platform=linux-amd64 ;;
