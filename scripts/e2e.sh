@@ -51,6 +51,16 @@ case "${1:-}" in
 esac
 for tool in uv curl; do command -v "$tool" >/dev/null || die "$tool not found"; done
 
+# One run at a time, before anything under build/e2e is touched: a run
+# replaces build/e2e/run, which a running one's servers read their identity
+# and keys from (and both would share the device). An flock on fd 9 (through
+# perl: macOS has no flock(1)), held until this shell exits; what it starts
+# gets fd 9 closed, so a leftover child can't keep the lock.
+mkdir -p "$WORK"
+exec 9>"$WORK/lock"
+perl -MFcntl=:flock -e 'open(my $fh, ">&=", 9) or die "fd 9: $!\n"; flock($fh, LOCK_EX | LOCK_NB) or exit 1' ||
+  die "another e2e run is using $WORK"
+
 case "$(uname -s)/$(uname -m)" in
   Linux/x86_64) platform=linux-amd64 ;;
   Linux/aarch64|Linux/arm64) platform=linux-arm64 ;;
@@ -122,22 +132,6 @@ json_field() { uv run --no-project python -c 'import json, sys; print(json.load(
 # site and cidr belong to the control endpoint (scripts/e2e/control.py), so a
 # test can stop and restart them.
 
-# One run at a time: a run replaces build/e2e/run, which the servers of a run
-# still going read their identity and keys from (and both would share the
-# device). The lock holds the owner's pid; a dead owner's lock is taken over.
-LOCK=$WORK/lock
-mkdir -p "$WORK"
-if ! mkdir "$LOCK" 2>/dev/null; then
-  owner=$(cat "$LOCK/pid" 2>/dev/null || true)
-  if [ -n "$owner" ] && kill -0 "$owner" 2>/dev/null; then
-    die "another e2e run (pid $owner) is using $WORK"
-  fi
-  rm -rf "$LOCK"
-  mkdir "$LOCK" || die "could not take $LOCK"
-fi
-echo $$ >"$LOCK/pid"
-trap 'rm -rf "$LOCK"' EXIT
-
 rm -rf "$RUN"
 mkdir -p "$RUN/www" "$RUN/site-home" "$RUN/plain-home" "$RUN/cidr-home"
 chmod 700 "$RUN"
@@ -190,18 +184,17 @@ pids=()
 cleanup() {
   for pid in "${pids[@]}"; do kill "$pid" 2>/dev/null || true; done
   wait 2>/dev/null || true
-  rm -rf "$LOCK"
 }
 trap cleanup EXIT
 
 info "starting the e2e servers ($("$flextunnel" --version))"
 uv run --no-project python -m http.server "$site_port" --bind 127.0.0.1 --directory "$RUN/www" \
-  >"$RUN/http.log" 2>&1 &
+  >"$RUN/http.log" 2>&1 9>&- &
 pids+=($!)
 uv run --no-project python scripts/e2e/control.py "$control_port" "$RUN/servers.json" \
-  >"$RUN/control.log" 2>&1 &
+  >"$RUN/control.log" 2>&1 9>&- &
 pids+=($!)
-HOME=$RUN/plain-home "$flextunnel" server start -c "$RUN/plain.toml" >"$RUN/plain.log" 2>&1 &
+HOME=$RUN/plain-home "$flextunnel" server start -c "$RUN/plain.toml" >"$RUN/plain.log" 2>&1 9>&- &
 pids+=($!)
 
 # Ready once every server prints its id, the site answers and the control
@@ -240,7 +233,7 @@ status=0
   "$arg.authKey=$client_secret" \
   "$arg.sitePort=$site_port" \
   "$arg.controlPort=$control_port" \
-  "$@" || status=$?
+  "$@" 9>&- || status=$?
 
 if [ "$status" != 0 ]; then
   for log in "$RUN/site.log" "$RUN/plain.log" "$RUN/cidr.log"; do
