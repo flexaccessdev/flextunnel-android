@@ -1,101 +1,164 @@
 #!/usr/bin/env bash
 #
 # End-to-end test: the app on the development emulator, against a throwaway
-# flextunnel server on debian-vm (linux/arm64), built from the sibling
-# ../flextunnel working tree. See docs/e2e.md.
+# flextunnel server running on this machine. See docs/e2e.md.
 #
-#   1. ../flextunnel's ci/unix/remote.sh builds flextunnel-cli on debian-vm
-#      (its cargo target dir comes from the restic build cache);
+#   1. the server is the release binary of the tag the app's pinned
+#      libflextunnel comes from (flextunnel.releaseTag in gradle.properties),
+#      for this machine's OS and CPU, downloaded once per tag into
+#      build/e2e/releases and checked against the sha256 digest GitHub reports
+#      for the asset — client and server speak one protocol version and keep
+#      no backward compatibility. flexaccess-keys comes the same way, at the
+#      tag that release's Cargo.toml names. With FLEXTUNNEL_LOCAL_JNILIBS=1 the
+#      app links the local core build instead (scripts/run-device.sh), so the
+#      server is built from the sibling ../flextunnel working tree;
 #   2. a fresh server identity and client key are made for this run, and the
-#      server runs there as the transient systemd unit flextunnel-e2e, beside
-#      an HTTP server on its loopback (flextunnel-e2e-http) — the
-#      flextunnel-ssh-server service already on the VM is left alone;
+#      server runs here beside an HTTP server on loopback;
 #   3. the instrumented test (app/src/androidTest/…/E2eTest.kt) installs and
 #      runs on the device, given the server's node id, the client key and the
-#      HTTP port;
-#   4. both units stop, whatever happened.
+#      HTTP port. The emulator finds the server through iroh's n0 discovery and
+#      default relays, as a real client would, so the server can be anywhere
+#      with internet access;
+#   4. both stop, whatever happened.
 #
 # The device is ADB_SERIAL (default emulator-5554) on the adb server
 # ANDROID_ADB_SERVER_PORT points at (the MBP's, through FlexTunnel: 15037).
-# The app links the local core build: run scripts/run-device.sh (or
-# ../flextunnel/build-android.sh on a matching host) first.
+# Needs uv, curl and internet access; a local server build needs cargo.
 #
-# Usage: scripts/e2e.sh [--no-build]   # --no-build: reuse debian-vm's last binary
+# Usage: scripts/e2e.sh
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
-HOST="${E2E_HOST:-debian-vm}"
-TARGET_PORT="${E2E_TARGET_PORT:-18765}"
+SIBLING=../flextunnel
+WORK=$PWD/build/e2e
+RUN=$WORK/run
+# Release binaries, apart from local builds: only a checked download lands here.
+RELEASES_ROOT=$WORK/releases
+TOOLS_ROOT=$WORK/tools
 export ANDROID_SERIAL="${ADB_SERIAL:-emulator-5554}"
-BUILD=1
-for arg in "$@"; do
-  case "$arg" in
-    --no-build) BUILD=0 ;;
-    -h|--help) sed -n '2,25p' "${BASH_SOURCE[0]}"; exit 0 ;;
-    *) echo "unknown option: $arg" >&2; exit 1 ;;
-  esac
-done
 
-if [ "$BUILD" = 1 ]; then
-  echo "== building flextunnel-cli on $HOST"
-  (cd ../flextunnel && ci/unix/remote.sh -H "$HOST" run cargo build --release -p flextunnel-cli)
+info() { echo "== $*"; }
+die() { echo "e2e: error: $*" >&2; exit 1; }
+
+case "${1:-}" in
+  "") ;;
+  -h|--help) sed -n '2,29p' "${BASH_SOURCE[0]}"; exit 0 ;;
+  *) die "unknown option: $1" ;;
+esac
+for tool in uv curl; do command -v "$tool" >/dev/null || die "$tool not found"; done
+
+case "$(uname -s)/$(uname -m)" in
+  Linux/x86_64) platform=linux-amd64 ;;
+  Linux/aarch64|Linux/arm64) platform=linux-arm64 ;;
+  Darwin/arm64) platform=macos-arm64 ;;
+  *) die "no flextunnel release binary for $(uname -s)/$(uname -m)" ;;
+esac
+
+sha256() { if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1; }
+
+# Downloads release asset $3 of GitHub repo $1 at tag $2 to $4, once.
+download_release_binary() {
+  local repo=$1 tag=$2 asset=$3 dest=$4 digest tmp actual
+  [ -x "$dest" ] && return
+  info "downloading $repo $tag $asset"
+  digest=$(curl -fsSL "https://api.github.com/repos/$repo/releases/tags/$tag" |
+    uv run --no-project python -c '
+import json, sys
+assets = [a for a in json.load(sys.stdin)["assets"] if a["name"] == sys.argv[1]]
+print(assets[0].get("digest") or "" if assets else "")' "$asset") ||
+    die "could not read the $repo $tag release"
+  [[ $digest == sha256:* ]] || die "$repo $tag has no sha256 digest for $asset"
+  mkdir -p "$RELEASES_ROOT" "$(dirname "$dest")"
+  tmp=$(mktemp "$RELEASES_ROOT/.download.XXXXXX")
+  curl -fsSL -o "$tmp" "https://github.com/$repo/releases/download/$tag/$asset" ||
+    { rm -f "$tmp"; die "could not download $asset from $repo $tag"; }
+  actual=$(sha256 "$tmp")
+  [ "$actual" = "${digest#sha256:}" ] ||
+    { rm -f "$tmp"; die "$asset from $repo $tag: sha256 $actual, release says ${digest#sha256:}"; }
+  chmod +x "$tmp"
+  mv "$tmp" "$dest"
+}
+
+# The flexaccess-keys tag a flextunnel Cargo.toml (on stdin) depends on.
+keys_tag_of() { sed -n 's/^flexaccess-keys = .*tag = "\([^"]*\)".*/\1/p'; }
+
+if [ "${FLEXTUNNEL_LOCAL_JNILIBS:-}" = 1 ]; then
+  command -v cargo >/dev/null || die 'cargo not found (needed to build the local server)'
+  info "building flextunnel from the $SIBLING working tree"
+  CARGO_TARGET_DIR=$WORK/cargo-target cargo install --locked --quiet \
+    --path "$SIBLING/crates/flextunnel-cli" --root "$TOOLS_ROOT" --force
+  flextunnel=$TOOLS_ROOT/bin/flextunnel
+  keys_tag=$(keys_tag_of <"$SIBLING/Cargo.toml")
+else
+  tag=$(sed -n 's/^flextunnel\.releaseTag=//p' gradle.properties)
+  [ -n "$tag" ] || die 'no flextunnel.releaseTag in gradle.properties'
+  flextunnel=$RELEASES_ROOT/flextunnel-$tag/flextunnel
+  download_release_binary flexaccessdev/flextunnel "$tag" "flextunnel-$platform" "$flextunnel"
+  keys_tag=$(curl -fsSL "https://raw.githubusercontent.com/flexaccessdev/flextunnel/$tag/Cargo.toml" |
+    keys_tag_of) || die "could not read Cargo.toml at flextunnel $tag"
 fi
+[ -n "$keys_tag" ] || die 'could not find the flexaccess-keys tag in the flextunnel Cargo.toml'
+keys=$RELEASES_ROOT/flexaccess-keys-$keys_tag/flexaccess-keys
+download_release_binary flexaccessdev/flexaccess-keys "$keys_tag" "flexaccess-keys-$platform" "$keys"
 
-key_json="$(flexaccess-keys generate-auth-key --json flextunnel-android-e2e)"
-client_secret="$(printf '%s' "$key_json" | sed -n 's/.*"private_key":"\([^"]*\)".*/\1/p')"
-client_public="$(printf '%s' "$key_json" | sed -n 's/.*"authorized_key":"\([^"]*\)".*/\1/p')"
-[ -n "$client_secret" ] && [ -n "$client_public" ] || { echo "could not generate a client key" >&2; exit 1; }
+json_field() { uv run --no-project python -c 'import json, sys; print(json.load(sys.stdin)[sys.argv[1]])' "$1"; }
 
+rm -rf "$RUN"
+mkdir -p "$RUN/www"
+chmod 700 "$RUN"
+echo "flextunnel-android e2e" >"$RUN/www/index.html"
+"$flextunnel" generate-iroh-key -o "$RUN/server.key" >/dev/null
+node_id=$("$flextunnel" show-iroh-id -s "$RUN/server.key" --json | json_field endpoint_id)
+client=$("$keys" generate-auth-key --json flextunnel-android-e2e)
+client_secret=$(json_field private_key <<<"$client")
+json_field authorized_key <<<"$client" >"$RUN/authorized_keys"
+printf 'secret_file = "%s"\nauthorized_keys_file = "%s"\n' "$RUN/server.key" "$RUN/authorized_keys" >"$RUN/server.toml"
+
+# A free port for the HTTP server on loopback.
+target_port=$(uv run --no-project python -c '
+import socket
+s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+
+pids=()
 cleanup() {
-  # http.server exits on SIGTERM with an error status: reset-failed, so no unit lingers.
-  ssh "$HOST" 'sudo systemctl stop flextunnel-e2e flextunnel-e2e-http 2>/dev/null; sudo systemctl reset-failed flextunnel-e2e flextunnel-e2e-http 2>/dev/null; true' || true
+  for pid in "${pids[@]}"; do kill "$pid" 2>/dev/null || true; done
+  wait 2>/dev/null || true
 }
 trap cleanup EXIT
 
-echo "== starting the e2e server on $HOST"
-# ssh joins its arguments into one remote command line: quote them for it.
-node_id="$(ssh "$HOST" "bash -s -- $(printf '%q ' "$client_public" "$TARGET_PORT")" <<'REMOTE'
-set -euo pipefail
-public=$1 port=$2
-D="$HOME/codes/staging-area/flextunnel-android-e2e"
-sudo systemctl stop flextunnel-e2e flextunnel-e2e-http 2>/dev/null || true
-sudo systemctl reset-failed flextunnel-e2e flextunnel-e2e-http 2>/dev/null || true
-rm -rf "$D"; mkdir -p "$D/www"; chmod 700 "$D"
-cp "$HOME/codes/staging-area/flextunnel-cargo-target/release/flextunnel" "$D/"
-echo "flextunnel-android e2e" > "$D/www/index.html"
-"$D/flextunnel" generate-iroh-key -o "$D/server.key" --json 2>/dev/null |
-  sed -n 's/.*"endpoint_id":"\([^"]*\)".*/\1/p' > "$D/endpoint_id"
-printf '%s\n' "$public" > "$D/authorized_keys"
-printf 'secret_file = "%s"\nauthorized_keys_file = "%s"\n' "$D/server.key" "$D/authorized_keys" > "$D/server.toml"
-sudo systemd-run --quiet --unit flextunnel-e2e --uid "$(id -u)" --gid "$(id -g)" \
-  --working-directory "$D" "$D/flextunnel" server start -c "$D/server.toml"
-sudo systemd-run --quiet --unit flextunnel-e2e-http --uid "$(id -u)" --gid "$(id -g)" \
-  --working-directory "$D" "$HOME/.local/bin/uv" run --no-project --python 3.13 \
-  python -m http.server "$port" --bind 127.0.0.1 --directory "$D/www"
+info "starting the e2e server ($("$flextunnel" --version))"
+uv run --no-project python -m http.server "$target_port" --bind 127.0.0.1 --directory "$RUN/www" \
+  >"$RUN/http.log" 2>&1 &
+pids+=($!)
+"$flextunnel" server start -c "$RUN/server.toml" >"$RUN/server.log" 2>&1 &
+pids+=($!)
 # Ready once the server prints its id and the HTTP server answers.
+ready=0
 for _ in $(seq 60); do
-  if sudo journalctl -u flextunnel-e2e --no-pager -o cat | grep "Node ID" >/dev/null &&
-     curl -fsS --max-time 3 -o /dev/null "http://127.0.0.1:$port/"; then
-    cat "$D/endpoint_id"; exit 0
+  if grep -q "Node ID" "$RUN/server.log" &&
+    curl -fsS --max-time 3 -o /dev/null "http://127.0.0.1:$target_port/"; then
+    ready=1
+    break
   fi
+  kill -0 "${pids[1]}" 2>/dev/null || break
   sleep 1
 done
-echo 'the e2e server did not come up:' >&2
-sudo journalctl -u flextunnel-e2e -u flextunnel-e2e-http --no-pager -n 30 >&2
-exit 1
-REMOTE
-)"
+if [ "$ready" != 1 ]; then
+  echo 'the e2e server did not come up:' >&2
+  tail -n 30 "$RUN/server.log" "$RUN/http.log" >&2
+  exit 1
+fi
 echo "   server node id $node_id"
 
-echo "== running the instrumented test on $ANDROID_SERIAL"
+info "running the instrumented test on $ANDROID_SERIAL"
 status=0
-FLEXTUNNEL_LOCAL_JNILIBS=1 ./gradlew :app:connectedDebugAndroidTest --console=plain \
+./gradlew :app:connectedDebugAndroidTest --console=plain \
   -Pandroid.testInstrumentationRunnerArguments.serverNodeId="$node_id" \
   -Pandroid.testInstrumentationRunnerArguments.authKey="$client_secret" \
-  -Pandroid.testInstrumentationRunnerArguments.targetPort="$TARGET_PORT" || status=$?
+  -Pandroid.testInstrumentationRunnerArguments.targetPort="$target_port" || status=$?
 
 if [ "$status" != 0 ]; then
-  echo "== server log"
-  ssh "$HOST" 'sudo journalctl -u flextunnel-e2e --no-pager -n 40 -o cat' || true
+  info "server log"
+  tail -n 40 "$RUN/server.log" || true
 fi
 exit "$status"
