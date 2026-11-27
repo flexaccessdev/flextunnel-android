@@ -23,6 +23,7 @@ import dev.flexaccess.flextunnel.E2e.startAndWait
 import dev.flexaccess.flextunnel.E2e.stopAndWait
 import dev.flexaccess.flextunnel.E2e.waitFor
 import dev.flexaccess.flextunnel.tunnelcore.PortForward
+import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -186,9 +187,11 @@ class SessionE2eTest {
 
     /**
      * Custom relays reach the session, with their QUIC address discovery off
-     * or on: the core refuses a setting it can't apply, so a session that
-     * starts took it. Nothing is used: the session starts without contacting
-     * a relay or a server.
+     * or on: the config the service hands the core carries the setting, and
+     * the core starts with it. (The core takes an omitted setting as on and
+     * doesn't report it back, so the config is where it can be checked.)
+     * Nothing is used: the session starts without contacting a relay or a
+     * server.
      */
     @Test
     fun customRelaysAndTheirQuicAddrDiscoveryReachTheSession() {
@@ -196,6 +199,8 @@ class SessionE2eTest {
             E2e.reset(SITE, PLAIN, CIDR) {
                 it.copy(relayUrls = listOf(RELAY), relayQuicAddrDiscovery = discovery)
             }
+            val config = JSONObject(manager.buildConfig().getOrThrow())
+            assertEquals(discovery, config.getBoolean("relay_quic_addr_discovery"))
             startAndWait()
             val status = clientStatus()
             assertEquals(setOf(SITE, PLAIN, CIDR), status.keys)

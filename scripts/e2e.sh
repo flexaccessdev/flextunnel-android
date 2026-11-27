@@ -122,6 +122,22 @@ json_field() { uv run --no-project python -c 'import json, sys; print(json.load(
 # site and cidr belong to the control endpoint (scripts/e2e/control.py), so a
 # test can stop and restart them.
 
+# One run at a time: a run replaces build/e2e/run, which the servers of a run
+# still going read their identity and keys from (and both would share the
+# device). The lock holds the owner's pid; a dead owner's lock is taken over.
+LOCK=$WORK/lock
+mkdir -p "$WORK"
+if ! mkdir "$LOCK" 2>/dev/null; then
+  owner=$(cat "$LOCK/pid" 2>/dev/null || true)
+  if [ -n "$owner" ] && kill -0 "$owner" 2>/dev/null; then
+    die "another e2e run (pid $owner) is using $WORK"
+  fi
+  rm -rf "$LOCK"
+  mkdir "$LOCK" || die "could not take $LOCK"
+fi
+echo $$ >"$LOCK/pid"
+trap 'rm -rf "$LOCK"' EXIT
+
 rm -rf "$RUN"
 mkdir -p "$RUN/www" "$RUN/site-home" "$RUN/plain-home" "$RUN/cidr-home"
 chmod 700 "$RUN"
@@ -174,6 +190,7 @@ pids=()
 cleanup() {
   for pid in "${pids[@]}"; do kill "$pid" 2>/dev/null || true; done
   wait 2>/dev/null || true
+  rm -rf "$LOCK"
 }
 trap cleanup EXIT
 

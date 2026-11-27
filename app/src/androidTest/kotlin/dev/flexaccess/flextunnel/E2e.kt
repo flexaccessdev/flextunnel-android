@@ -47,6 +47,7 @@ object E2e {
     const val CIDR = "cidr"
     const val SITE_HOST = "e2e.flextunnel.test"
     const val CIDR_RANGE = "203.0.113.0/24"
+    private const val KEY_NAME = "e2e"
 
     /** The fixture pages' texts (scripts/e2e/fixtures). */
     const val HOME_TEXT = "flextunnel e2e home"
@@ -102,8 +103,10 @@ object E2e {
         stopAndWait()
         val keys = manager.authKeys
         val public = AuthKey.publicKey(authKey)
+        // A run's key is fresh: one left by an earlier run holds the name.
+        keys.keys.value.filter { it.name == KEY_NAME && it.publicKey != public }.forEach { assertNull(keys.delete(it.id)) }
         val key = keys.keys.value.firstOrNull { it.publicKey == public }
-            ?: keys.add("e2e", authKey).getOrThrow()
+            ?: keys.add(KEY_NAME, authKey).getOrThrow()
         val profiles = manager.profiles
         profiles.forwards.value.forEach { assertNull(profiles.deleteForward(it.id)) }
         profiles.destinations.value.forEach { assertNull(profiles.deleteDestination(it.id)) }

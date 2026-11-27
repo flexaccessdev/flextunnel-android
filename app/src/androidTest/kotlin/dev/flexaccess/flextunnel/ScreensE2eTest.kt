@@ -156,6 +156,11 @@ class ScreensE2eTest {
         val discovery = compose.onNodeWithTag("relayQuicAddrDiscovery")
         discovery.performScrollTo().assertIsNotEnabled().assertIsOn()
 
+        // Separators alone are no relay: saved, they are the default relays.
+        compose.onNodeWithTag("relayUrls").performScrollTo().performTextInput(", \n")
+        discovery.performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("relayUrls").performScrollTo().performTextClearance()
+
         compose.onNodeWithTag("relayUrls").performScrollTo().performTextInput(RELAY)
         discovery.performScrollTo().assertIsEnabled().assertIsOn().performClick()
         discovery.assertIsOff()

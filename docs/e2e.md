@@ -16,6 +16,9 @@ scripts/run-device.sh --no-log   # the local core build, for the device's ABI
 FLEXTUNNEL_LOCAL_JNILIBS=1 scripts/e2e.sh
 ```
 
+One run at a time: a second one, while the first is going, stops at once
+(`build/e2e/lock`).
+
 ## What runs where
 
 | Piece | Where |

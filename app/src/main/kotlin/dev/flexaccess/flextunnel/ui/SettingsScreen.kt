@@ -155,7 +155,8 @@ fun SettingsScreen(manager: SessionManager, onKeys: () -> Unit, onDone: () -> Un
                 visualTransformation = PasswordVisualTransformation(),
                 modifier = Modifier.fillMaxWidth().testTag("relayToken"),
             )
-            val customRelays = relays.isNotBlank()
+            // As save parses it: a field of separators only is the default relays.
+            val customRelays = Rules.splitRules(relays).isNotEmpty()
             // The whole row toggles, so TalkBack names the switch by its label.
             Row(
                 Modifier
