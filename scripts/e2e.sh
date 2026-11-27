@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# End-to-end test: the app on the development emulator, against a throwaway
-# flextunnel server running on this machine. See docs/e2e.md.
+# End-to-end tests: the app on the development emulator, against throwaway
+# flextunnel servers running on this machine. See docs/e2e.md.
 #
-#   1. the server is the release binary of the tag the app's pinned
+#   1. the servers are the release binary of the tag the app's pinned
 #      libflextunnel comes from (flextunnel.releaseTag in gradle.properties),
 #      for this machine's OS and CPU, downloaded once per tag into
 #      build/e2e/releases and checked against the sha256 digest GitHub reports
@@ -11,21 +11,27 @@
 #      no backward compatibility. flexaccess-keys comes the same way, at the
 #      tag that release's Cargo.toml names. With FLEXTUNNEL_LOCAL_JNILIBS=1 the
 #      app links the local core build instead (scripts/run-device.sh), so the
-#      server is built from the sibling ../flextunnel working tree;
-#   2. a fresh server identity and client key are made for this run, and the
-#      server runs here beside an HTTP server on loopback;
-#   3. the instrumented test (app/src/androidTest/…/E2eTest.kt) installs and
-#      runs on the device, given the server's node id, the client key and the
-#      HTTP port. The emulator finds the server through iroh's n0 discovery and
-#      default relays, as a real client would, so the server can be anywhere
-#      with internet access;
-#   4. both stop, whatever happened.
+#      servers are built from the sibling ../flextunnel working tree;
+#   2. three servers (site, plain, cidr: see below), a fixture site
+#      (scripts/e2e/fixtures) and a control endpoint that stops and restarts
+#      site and cidr (scripts/e2e/control.py) start here on loopback, with a
+#      fresh identity per server and one fresh client key;
+#   3. the instrumented tests (app/src/androidTest) install and run on the
+#      device, given the servers' node ids, the client key, the site's port and
+#      the control endpoint's. They drive the session through the app's SOCKS5
+#      proxy and forwards, and its screens. The emulator finds the servers
+#      through iroh's n0 discovery and default relays, as a real client would,
+#      and cannot see this machine's loopback: it reaches the site and the
+#      control endpoint through the tunnel, as the servers' own loopback;
+#   4. everything stops, whatever happened; the run's logs stay in
+#      build/e2e/run.
 #
 # The device is ADB_SERIAL (default emulator-5554) on the adb server
 # ANDROID_ADB_SERVER_PORT points at (the MBP's, through FlexTunnel: 15037).
 # Needs uv, curl and internet access; a local server build needs cargo.
 #
-# Usage: scripts/e2e.sh
+# Usage: scripts/e2e.sh [gradle arguments]
+#   scripts/e2e.sh -Pandroid.testInstrumentationRunnerArguments.class=dev.flexaccess.flextunnel.SocksE2eTest
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -41,9 +47,7 @@ info() { echo "== $*"; }
 die() { echo "e2e: error: $*" >&2; exit 1; }
 
 case "${1:-}" in
-  "") ;;
-  -h|--help) sed -n '2,29p' "${BASH_SOURCE[0]}"; exit 0 ;;
-  *) die "unknown option: $1" ;;
+  -h|--help) sed -n '2,34p' "${BASH_SOURCE[0]}"; exit 0 ;;
 esac
 for tool in uv curl; do command -v "$tool" >/dev/null || die "$tool not found"; done
 
@@ -103,21 +107,68 @@ download_release_binary flexaccessdev/flexaccess-keys "$keys_tag" "flexaccess-ke
 
 json_field() { uv run --no-project python -c 'import json, sys; print(json.load(sys.stdin)[sys.argv[1]])' "$1"; }
 
+# --- servers and site ----------------------------------------------------------
+#
+# Three servers, each with its own identity and HOME (its lock and
+# duplicate-id blocklist stay scratch files), all authorizing one fresh client
+# key, and all with this machine's loopback as their own:
+#   - site: routes the fixture site's host alias `e2e.flextunnel.test` (a name
+#     only it resolves, so a page that loads came through it) and `localhost`
+#     (which the device also answers directly, so a fallback would show);
+#   - plain: routes nothing; reached by its loopback name. Never stopped, it
+#     carries the tests' calls to the control endpoint;
+#   - cidr: routes TEST-NET-3 and logs each stream's target, so a test can see
+#     an address in the range arrive.
+# site and cidr belong to the control endpoint (scripts/e2e/control.py), so a
+# test can stop and restart them.
+
 rm -rf "$RUN"
-mkdir -p "$RUN/www"
+mkdir -p "$RUN/www" "$RUN/site-home" "$RUN/plain-home" "$RUN/cidr-home"
 chmod 700 "$RUN"
-echo "flextunnel-android e2e" >"$RUN/www/index.html"
-"$flextunnel" generate-iroh-key -o "$RUN/server.key" >/dev/null
-node_id=$("$flextunnel" show-iroh-id -s "$RUN/server.key" --json | json_field endpoint_id)
+cp scripts/e2e/fixtures/* "$RUN/www/"
+
 client=$("$keys" generate-auth-key --json flextunnel-android-e2e)
 client_secret=$(json_field private_key <<<"$client")
 json_field authorized_key <<<"$client" >"$RUN/authorized_keys"
-printf 'secret_file = "%s"\nauthorized_keys_file = "%s"\n' "$RUN/server.key" "$RUN/authorized_keys" >"$RUN/server.toml"
+for server in site plain cidr; do
+  "$flextunnel" generate-iroh-key -o "$RUN/$server.key" >/dev/null
+  printf 'secret_file = "%s"\nauthorized_keys_file = "%s"\n' "$RUN/$server.key" "$RUN/authorized_keys" \
+    >"$RUN/$server.toml"
+done
+node_id() { "$flextunnel" show-iroh-id -s "$RUN/$1.key" --json | json_field endpoint_id; }
+site_node_id=$(node_id site)
+plain_node_id=$(node_id plain)
+cidr_node_id=$(node_id cidr)
+cat >>"$RUN/site.toml" <<'TOML'
+routed_domains = ["e2e.flextunnel.test", "*.e2e.flextunnel.test", "localhost"]
 
-# A free port for the HTTP server on loopback.
-target_port=$(uv run --no-project python -c '
+[host_aliases]
+"e2e.flextunnel.test" = "127.0.0.1"
+TOML
+echo 'routed_cidrs = ["203.0.113.0/24"]' >>"$RUN/cidr.toml"
+
+# Free loopback ports for the site and the control endpoint.
+read -r site_port control_port < <(uv run --no-project python -c '
 import socket
-s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+socks = [socket.socket() for _ in range(2)]
+for s in socks: s.bind(("127.0.0.1", 0))
+print(*(s.getsockname()[1] for s in socks))')
+
+uv run --no-project python -c '
+import json, sys
+flextunnel, run = sys.argv[1:]
+print(json.dumps({
+    name: {
+        "argv": [flextunnel, "server", "start", "-c", f"{run}/{name}.toml"],
+        "home": f"{run}/{name}-home",
+        "log": f"{run}/{name}.log",
+        "env": env,
+    }
+    for name, env in [
+        ("site", {}),
+        ("cidr", {"RUST_LOG": "info,flextunnel_core::proxy::server=debug"}),
+    ]
+}))' "$flextunnel" "$RUN" >"$RUN/servers.json"
 
 pids=()
 cleanup() {
@@ -126,39 +177,58 @@ cleanup() {
 }
 trap cleanup EXIT
 
-info "starting the e2e server ($("$flextunnel" --version))"
-uv run --no-project python -m http.server "$target_port" --bind 127.0.0.1 --directory "$RUN/www" \
+info "starting the e2e servers ($("$flextunnel" --version))"
+uv run --no-project python -m http.server "$site_port" --bind 127.0.0.1 --directory "$RUN/www" \
   >"$RUN/http.log" 2>&1 &
 pids+=($!)
-"$flextunnel" server start -c "$RUN/server.toml" >"$RUN/server.log" 2>&1 &
+uv run --no-project python scripts/e2e/control.py "$control_port" "$RUN/servers.json" \
+  >"$RUN/control.log" 2>&1 &
 pids+=($!)
-# Ready once the server prints its id and the HTTP server answers.
+HOME=$RUN/plain-home "$flextunnel" server start -c "$RUN/plain.toml" >"$RUN/plain.log" 2>&1 &
+pids+=($!)
+
+# Ready once every server prints its id, the site answers and the control
+# endpoint sees its servers running.
+logs=("$RUN/site.log" "$RUN/plain.log" "$RUN/cidr.log" "$RUN/control.log" "$RUN/http.log")
 ready=0
 for _ in $(seq 60); do
-  if grep -q "Node ID" "$RUN/server.log" &&
-    curl -fsS --max-time 3 -o /dev/null "http://127.0.0.1:$target_port/"; then
+  if grep -q "Node ID" "$RUN/site.log" "$RUN/plain.log" "$RUN/cidr.log" 2>/dev/null &&
+    [ "$(grep -l "Node ID" "$RUN/site.log" "$RUN/plain.log" "$RUN/cidr.log" 2>/dev/null | wc -l)" = 3 ] &&
+    curl -fsS --max-time 3 -o /dev/null "http://127.0.0.1:$site_port/" &&
+    curl -fsS --max-time 3 -o /dev/null "http://127.0.0.1:$control_port/health"; then
     ready=1
     break
   fi
-  kill -0 "${pids[1]}" 2>/dev/null || break
+  for pid in "${pids[@]}"; do kill -0 "$pid" 2>/dev/null || break 2; done
   sleep 1
 done
 if [ "$ready" != 1 ]; then
-  echo 'the e2e server did not come up:' >&2
-  tail -n 30 "$RUN/server.log" "$RUN/http.log" >&2
+  echo 'the e2e servers did not come up:' >&2
+  tail -n 20 "${logs[@]}" >&2
   exit 1
 fi
-echo "   server node id $node_id"
+echo "   site  $site_node_id, http://e2e.flextunnel.test:$site_port"
+echo "   plain $plain_node_id, control on its loopback port $control_port"
+echo "   cidr  $cidr_node_id"
 
-info "running the instrumented test on $ANDROID_SERIAL"
+# --- tests -----------------------------------------------------------------------
+
+info "running the instrumented tests on $ANDROID_SERIAL"
+arg=-Pandroid.testInstrumentationRunnerArguments
 status=0
 ./gradlew :app:connectedDebugAndroidTest --console=plain \
-  -Pandroid.testInstrumentationRunnerArguments.serverNodeId="$node_id" \
-  -Pandroid.testInstrumentationRunnerArguments.authKey="$client_secret" \
-  -Pandroid.testInstrumentationRunnerArguments.targetPort="$target_port" || status=$?
+  "$arg.siteNodeId=$site_node_id" \
+  "$arg.plainNodeId=$plain_node_id" \
+  "$arg.cidrNodeId=$cidr_node_id" \
+  "$arg.authKey=$client_secret" \
+  "$arg.sitePort=$site_port" \
+  "$arg.controlPort=$control_port" \
+  "$@" || status=$?
 
 if [ "$status" != 0 ]; then
-  info "server log"
-  tail -n 40 "$RUN/server.log" || true
+  for log in "$RUN/site.log" "$RUN/plain.log" "$RUN/cidr.log"; do
+    info "$(basename "$log")"
+    tail -n 30 "$log" || true
+  done
 fi
 exit "$status"

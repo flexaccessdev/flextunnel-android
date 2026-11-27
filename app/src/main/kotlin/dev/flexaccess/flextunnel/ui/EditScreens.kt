@@ -133,6 +133,7 @@ fun DestinationEditScreen(manager: SessionManager, id: String?, onDone: () -> Un
         Field(domains, { domains = it }, "Domains: name, *.suffix or *", "domains", singleLine = false, enabled = !fetching)
         Field(cidrs, { cidrs = it }, "IP ranges: 10.0.0.0/8, one address", "cidrs", singleLine = false, enabled = !fetching)
         OutlinedButton(
+            modifier = Modifier.testTag("fetchRoutes"),
             enabled = !fetching && nodeId.isNotBlank(),
             onClick = {
                 fetching = true
@@ -223,7 +224,7 @@ fun ForwardEditScreen(manager: SessionManager, id: String?, onDone: () -> Unit) 
         Field(remotePort, { remotePort = it.filter(Char::isDigit) }, "Remote port", "remotePort", number = true)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Enabled", modifier = Modifier.weight(1f))
-            Switch(checked = enabled, onCheckedChange = { enabled = it })
+            Switch(checked = enabled, onCheckedChange = { enabled = it }, modifier = Modifier.testTag("enabled"))
         }
         Footnote("A forward never connects directly: its host must be a server's loopback name or on a destination's routes.")
         if (existing != null) {

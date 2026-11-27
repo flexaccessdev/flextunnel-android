@@ -71,7 +71,7 @@ with its own CPU — arm64-v8a on macvm, x86_64 on an x86 machine — and
 ```sh
 export ANDROID_ADB_SERVER_PORT=15037 ADB_SERIAL=emulator-5554   # the MBP's emulator, through FlexTunnel
 scripts/run-device.sh
-scripts/e2e.sh        # end to end against a throwaway server (docs/e2e.md)
+scripts/e2e.sh        # end to end against throwaway servers (docs/e2e.md)
 ```
 
 Release builds: `scripts/build-release-apk.sh` (signed APK, `--bundle` for an AAB).
