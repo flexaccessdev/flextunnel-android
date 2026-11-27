@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -39,6 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -154,14 +156,21 @@ fun SettingsScreen(manager: SessionManager, onKeys: () -> Unit, onDone: () -> Un
                 modifier = Modifier.fillMaxWidth().testTag("relayToken"),
             )
             val customRelays = relays.isNotBlank()
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            // The whole row toggles, so TalkBack names the switch by its label.
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .toggleable(
+                        value = quicAddrDiscovery,
+                        enabled = customRelays,
+                        role = Role.Switch,
+                        onValueChange = { quicAddrDiscovery = it },
+                    )
+                    .testTag("relayQuicAddrDiscovery"),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text("QUIC address discovery", modifier = Modifier.weight(1f))
-                Switch(
-                    checked = quicAddrDiscovery,
-                    onCheckedChange = { quicAddrDiscovery = it },
-                    enabled = customRelays,
-                    modifier = Modifier.testTag("relayQuicAddrDiscovery"),
-                )
+                Switch(checked = quicAddrDiscovery, onCheckedChange = null, enabled = customRelays)
             }
             Footnote(
                 if (customRelays) {

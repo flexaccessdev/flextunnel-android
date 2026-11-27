@@ -192,8 +192,8 @@ pids+=($!)
 logs=("$RUN/site.log" "$RUN/plain.log" "$RUN/cidr.log" "$RUN/control.log" "$RUN/http.log")
 ready=0
 for _ in $(seq 60); do
-  if grep -q "Node ID" "$RUN/site.log" "$RUN/plain.log" "$RUN/cidr.log" 2>/dev/null &&
-    [ "$(grep -l "Node ID" "$RUN/site.log" "$RUN/plain.log" "$RUN/cidr.log" 2>/dev/null | wc -l)" = 3 ] &&
+  # -eq: macOS wc pads its count with spaces.
+  if [ "$(grep -l "Node ID" "$RUN/site.log" "$RUN/plain.log" "$RUN/cidr.log" 2>/dev/null | wc -l)" -eq 3 ] &&
     curl -fsS --max-time 3 -o /dev/null "http://127.0.0.1:$site_port/" &&
     curl -fsS --max-time 3 -o /dev/null "http://127.0.0.1:$control_port/health"; then
     ready=1

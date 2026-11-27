@@ -71,7 +71,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path != "/health":
             return self.reply(404, "no such path")
         with lock:
-            dead = [n for n, p in procs.items() if p.poll() is not None]
+            dead = [n for n in specs if n not in procs or procs[n].poll() is not None]
         if dead:
             return self.reply(503, "exited: " + ", ".join(dead))
         self.reply(200, "ok")
@@ -98,16 +98,26 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
-def shutdown(*_):
+# The handler only asks for shutdown: the main thread may hold `lock` when a
+# signal arrives (starting the servers), so stopping them happens below, in the
+# main flow. A second signal just asks again.
+stopping = threading.Event()
+signal.signal(signal.SIGTERM, lambda *_: stopping.set())
+signal.signal(signal.SIGINT, lambda *_: stopping.set())
+
+server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+threading.Thread(target=server.serve_forever, daemon=True).start()
+try:
     with lock:
-        for name in procs:
+        for name in specs:
+            if stopping.is_set():
+                break
+            start(name)
+    stopping.wait()
+finally:
+    # Whatever ended the run, a failed start included: every server started
+    # so far stops (stop() skips the ones never started).
+    server.shutdown()
+    with lock:
+        for name in list(procs):
             stop(name)
-    os._exit(0)
-
-
-signal.signal(signal.SIGTERM, shutdown)
-signal.signal(signal.SIGINT, shutdown)
-with lock:
-    for name in specs:
-        start(name)
-ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()

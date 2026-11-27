@@ -87,14 +87,26 @@ class SessionE2eTest {
         assertNull(profiles.setForwardEnabled("alias", false))
         runOnMain { manager.applyForwards() }
         retry(10_000) { assertRefused(FORWARD_B) }
+        // Checked before PLAIN is used again, which would connect a restarted session's.
+        assertNotRestarted(PLAIN, SITE)
         assertAnswered(HOME_TEXT, getLocal(FORWARD_A, loopback(PLAIN)))
 
         // Added while running: it serves without a restart.
         assertNull(profiles.saveForward(PortForward("late", "", FORWARD_C, loopback(SITE), sitePort)))
         runOnMain { manager.applyForwards() }
         retry(10_000) { assertAnswered(HOME_TEXT, getLocal(FORWARD_C, loopback(SITE))) }
-        assertTrue("the session restarted", clientStatus().getValue(PLAIN).getString("state") == "connected")
+        assertNotRestarted(PLAIN)
+    }
+
+    /**
+     * The session still runs on its port, and [unused] destinations — not
+     * used since they connected — are still connected: a restarted session
+     * would have them idle until next used.
+     */
+    private fun assertNotRestarted(vararg unused: String) {
         assertEquals(SessionState.Running(SOCKS_PORT), manager.state.value)
+        val status = clientStatus()
+        unused.forEach { assertEquals("the session restarted: $it is no longer connected", "connected", status.getValue(it).getString("state")) }
     }
 
     /**
